@@ -16,6 +16,7 @@ package pipelinerun
 
 import (
 	"fmt"
+	"regexp"
 	"text/tabwriter"
 	"text/template"
 
@@ -54,10 +55,10 @@ type ListOptions struct {
 	Reverse       bool
 	AllNamespaces bool
 	NoHeaders     bool
+	Regex         string
 }
 
 func listCommand(p cli.Params) *cobra.Command {
-
 	opts := &ListOptions{Limit: 0}
 	f := cliopts.NewPrintFlags("list")
 	eg := `List all PipelineRuns of Pipeline 'foo':
@@ -88,7 +89,7 @@ List all PipelineRuns in a namespace 'foo':
 				return fmt.Errorf("limit was %d but must be a positive number", opts.Limit)
 			}
 
-			prs, err := list(p, pipeline, opts.Limit, opts.LabelSelector, opts.AllNamespaces)
+			prs, err := list(p, pipeline, opts.Limit, opts.LabelSelector, opts.AllNamespaces, opts.Regex)
 			if err != nil {
 				return fmt.Errorf("failed to list PipelineRuns from namespace %s: %v", p.Namespace(), err)
 			}
@@ -136,10 +137,11 @@ List all PipelineRuns in a namespace 'foo':
 	c.Flags().BoolVarP(&opts.Reverse, "reverse", "", opts.Reverse, "list PipelineRuns in reverse order")
 	c.Flags().BoolVarP(&opts.AllNamespaces, "all-namespaces", "A", opts.AllNamespaces, "list PipelineRuns from all namespaces")
 	c.Flags().BoolVarP(&opts.NoHeaders, "no-headers", "", opts.NoHeaders, "do not print column headers with output (default print column headers with output)")
+	c.Flags().StringVarP(&opts.Regex, "regex", "", opts.Regex, "list PipelineRuns matching regex pattern")
 	return c
 }
 
-func list(p cli.Params, pipeline string, limit int, labelselector string, allnamespaces bool) (*v1.PipelineRunList, error) {
+func list(p cli.Params, pipeline string, limit int, labelselector string, allnamespaces bool, regex string) (*v1.PipelineRunList, error) {
 	var selector string
 	var options metav1.ListOptions
 
@@ -173,6 +175,10 @@ func list(p cli.Params, pipeline string, limit int, labelselector string, allnam
 		return nil, err
 	}
 
+	// Filter PipelineRuns by regex pattern
+	if pipelineRuns, err = filterByRegex(pipelineRuns, regex); err != nil {
+		return nil, err
+	}
 	prslen := len(pipelineRuns.Items)
 
 	if prslen != 0 {
@@ -196,6 +202,24 @@ func list(p cli.Params, pipeline string, limit int, labelselector string, allnam
 	return pipelineRuns, nil
 }
 
+func filterByRegex(pipelineRuns *v1.PipelineRunList, regex string) (*v1.PipelineRunList, error) {
+	if regex == "" {
+		return pipelineRuns, nil
+	}
+	var filteredPipelineRuns []v1.PipelineRun
+	re, err := regexp.Compile(regex)
+	if err != nil {
+		return nil, err
+	}
+	for _, pr := range pipelineRuns.Items {
+		if re.MatchString(pr.Name) {
+			filteredPipelineRuns = append(filteredPipelineRuns, pr)
+		}
+	}
+	pipelineRuns.Items = filteredPipelineRuns
+	return pipelineRuns, nil
+}
+
 func reverse(prs *v1.PipelineRunList) {
 	i := 0
 	j := len(prs.Items) - 1
@@ -209,7 +233,7 @@ func reverse(prs *v1.PipelineRunList) {
 }
 
 func printFormatted(s *cli.Stream, prs *v1.PipelineRunList, c clockwork.Clock, allnamespaces bool, noheaders bool) error {
-	var data = struct {
+	data := struct {
 		PipelineRuns  *v1.PipelineRunList
 		Time          clockwork.Clock
 		AllNamespaces bool

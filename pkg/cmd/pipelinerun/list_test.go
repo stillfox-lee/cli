@@ -517,6 +517,12 @@ func TestListPipelineRuns(t *testing.T) {
 			args:      []string{"list", "--all-namespaces", "--no-headers"},
 			wantError: false,
 		},
+		{
+			name:      "print pipelineruns with regex",
+			command:   command(t, prs, clock.Now(), ns, version, dc1),
+			args:      []string{"list", "--regex", "pr2.*"},
+			wantError: false,
+		},
 	}
 
 	for _, td := range tests {
